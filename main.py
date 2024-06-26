@@ -31,7 +31,8 @@ def surf_web(search_query):
     r = requests.get(base_url, headers=headers, params={"q": search_query})
 
     if not r.status_code == 200:
-        raise Exception(f"Error: {r.status_code}")
+        pprint(f"Error: {r.status_code}")
+        pprint(r.text)
 
     json_data = r.json()
 
@@ -45,7 +46,7 @@ def download_article(url, website_name, title, description):
         article.parse()
         article.nlp()
     except Exception as e:
-        print(f"Failed to download {url}: {e}")
+        pprint(f"Failed to download {url}: {e}")
     finally:
         article.title = title
         article.meta_site_name = website_name
