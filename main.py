@@ -1,7 +1,5 @@
-import json
-import random
 from concurrent.futures import ThreadPoolExecutor
-
+from pprint import pprint
 import newspaper
 import requests
 import streamlit as st
@@ -16,7 +14,8 @@ config.REQUEST_TIMEOUT = 10
 config.browser_user_agent = (
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:108.0) Gecko/20100101 Firefox/108.0"
 )
-config.max_summary_sent = 3
+config.max_summary = 3000
+config.max_summary_sent = 2
 
 
 # Logic
@@ -138,6 +137,8 @@ def group_articles(articles):
     )
 
     lines = response.choices[0].message.content.split("\n")
+    pprint(articles)
+    pprint(lines)
 
     curr_group = ""
     grouped_articles = {}
@@ -148,8 +149,9 @@ def group_articles(articles):
             grouped_articles[curr_group] = []   
         elif line.startswith("- Article:"):
             url = line.split("Article: ")[1]
-            article = [article for article in articles if article["url"] == url][0]
-            grouped_articles[curr_group].append(article)
+            article = [article for article in articles if article["url"] == url]
+            if article:
+                grouped_articles[curr_group].append(article[0])
         else:
             continue
 
@@ -160,50 +162,62 @@ def main():
     # UI
     query = st.text_input("Search the web privately...")
     if query:
+        st.session_state["search_result"] = None
         results = surf_web(query)
         articles = download_articles(results)
         grouped_articles = group_articles(articles)
-
-        col1, col2, col3, col4, col5 = st.columns(5)
-
         group1, group2, group3, group4, group5 = grouped_articles.keys()
 
-        with col1:
-            st.write(group1)
-            for article in grouped_articles[group1]:
-                if st.button(article["website_name"], help=article["title"], key=article["url"]):
-                    st.session_state["search_result"] = article
-                    
-        with col2:
-            st.write(group2)
-            for article in grouped_articles[group2]:
-                if st.button(article["website_name"], help=article["title"], key=article["url"]):
-                    st.session_state["search_result"] = article
+        group_columns = st.columns(5)
 
-        with col3:
-            st.write(group3)
-            for article in grouped_articles[group3]:
-                if st.button(article["website_name"], help=article["title"], key=article["url"]):
-                    st.session_state["search_result"] = article
+        with group_columns[0]:
+            st.write(f"### {group1}")
+        with group_columns[1]:
+            st.write(f"### {group2}")
+        with group_columns[2]:
+            st.write(f"### {group3}")
+        with group_columns[3]:
+            st.write(f"### {group4}")
+        with group_columns[4]:
+            st.write(f"### {group5}")
 
-        with col4:
-            st.write(group4)
-            for article in grouped_articles[group4]:
-                if st.button(article["website_name"], help=article["title"], key=article["url"]):
-                    st.session_state["search_result"] = article
+        button_columns = st.columns(5, vertical_alignment="bottom")
 
-        with col5:
-            st.write(group5)
-            for article in grouped_articles[group5]:
-                if st.button(article["website_name"], help=article["title"], key=article["url"]):
-                    st.session_state["search_result"] = article
+        with st.container():
+            with button_columns[0]:
+                for article in grouped_articles[group1]:
+                    if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                        st.session_state["search_result"] = article
+                        
+            with button_columns[1]:
+                for article in grouped_articles[group2]:
+                    if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                        st.session_state["search_result"] = article
+
+            with button_columns[2]:
+                for article in grouped_articles[group3]:
+                    if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                        st.session_state["search_result"] = article
+
+            with button_columns[3]:
+                for article in grouped_articles[group4]:
+                    if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                        st.session_state["search_result"] = article
+
+            with button_columns[4]:
+                for article in grouped_articles[group5]:
+                    if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                        st.session_state["search_result"] = article
 
         with st.sidebar:
             if not st.session_state.get("search_result"):
                 st.write("Click a button to view the search result here.")
             else:
                 st.write(f'## {st.session_state["search_result"]["title"]}')
-                st.write(f'{st.session_state["search_result"]["summary"]}')
+                if not st.session_state["search_result"]["summary"] or "Something went wrong" in st.session_state["search_result"]["summary"]:
+                    st.markdown(f'{st.session_state["search_result"]["description"]}', unsafe_allow_html=True)
+                else:
+                    st.write(f'{st.session_state["search_result"]["summary"]}')
                 st.markdown(
                     f"[Go to this page]({st.session_state['search_result']['url']})",
                     unsafe_allow_html=True,
