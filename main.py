@@ -171,15 +171,15 @@ def main():
         group_columns = st.columns(5)
 
         with group_columns[0]:
-            st.write(f"### {group1}")
+            st.write(f"##### {group1}")
         with group_columns[1]:
-            st.write(f"### {group2}")
+            st.write(f"##### {group2}")
         with group_columns[2]:
-            st.write(f"### {group3}")
+            st.write(f"##### {group3}")
         with group_columns[3]:
-            st.write(f"### {group4}")
+            st.write(f"##### {group4}")
         with group_columns[4]:
-            st.write(f"### {group5}")
+            st.write(f"##### {group5}")
 
         button_columns = st.columns(5, vertical_alignment="bottom")
 
