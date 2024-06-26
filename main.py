@@ -16,6 +16,7 @@ config.REQUEST_TIMEOUT = 10
 config.browser_user_agent = (
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:108.0) Gecko/20100101 Firefox/108.0"
 )
+config.max_summary_sent = 3
 
 
 # Logic
@@ -96,11 +97,11 @@ def group_articles(articles):
     for article in articles:
         if not article["summary"] or "Something went wrong" in article["summary"]:
             article_information.append(
-                f"Title: {article['title']}\n Description: {article['description']}"
+                f"Title: {article['title']}\n Description: {article['description']}\n Url: {article['url']}"
             )
         else:
             article_information.append(
-                f"Title: {article['title']}\n Summary: {article['summary']}"
+                f"Title: {article['title']}\n Summary: {article['summary']}\n Url: {article['url']}"
             )
 
     messages = [
@@ -114,20 +115,20 @@ def group_articles(articles):
             are the 20 articles: {article_information}.\
             Here is the format of your response: \
             1. <Group 1> \
-            - Title: <Article x title> \
-            - Title: <as many articles as you put in this category> \
+            - Article: <Article x url> \
+            - Article: <as many articles as you put in this category> \
             2. <Group 2> \
-            - Title: <Article y title> \
-            - Title: <as many articles as you put in this category> \
+            - Article: <Article y url> \
+            - Article: <as many articles as you put in this category> \
             3. <Group 3> \
-            - Title: <Article z title> \
-            - Title: <as many articles as you put in this category> \
+            - Article: <Article z url> \
+            - Article: <as many articles as you put in this category> \
             4. <Group 4> \
-            - Title: <Article k title> \
-            - Title: <as many articles as you put in this category> \
+            - Article: <Article k url> \
+            - Article: <as many articles as you put in this category> \
             5. <Group 5> \
-            - Title: <Article l title> \
-            - Title: <as many articles as you put in this category>",
+            - Article: <Article l url> \
+            - Article: <as many articles as you put in this category>",
         },
     ]
         
@@ -145,9 +146,9 @@ def group_articles(articles):
         if line.startswith("1.") or line.startswith("2.") or line.startswith("3.") or line.startswith("4.") or line.startswith("5."):
             curr_group = line.split(". ")[1]
             grouped_articles[curr_group] = []   
-        elif line.startswith("- Title:"):
-            title = line.split("Title: ")[1]
-            article = [article for article in articles if article["title"] == title][0]
+        elif line.startswith("- Article:"):
+            url = line.split("Article: ")[1]
+            article = [article for article in articles if article["url"] == url][0]
             grouped_articles[curr_group].append(article)
         else:
             continue
