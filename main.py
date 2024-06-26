@@ -1,31 +1,32 @@
-import requests
 import json
-import re
 import random
+from concurrent.futures import ThreadPoolExecutor
+
 import newspaper
-
+import requests
 import streamlit as st
-
-import pandas as pd
-from transformers import BartTokenizer, BartForConditionalGeneration
-from openai import OpenAI
+from together import Together
 
 st.set_page_config(layout="wide")
 
-OPENAI_API_KEY = st.secrets["openai"]["api_key"]
-llm = OpenAI(api_key=OPENAI_API_KEY)
+client = Together(api_key=st.secrets["togetherai"]["api_key"])
 
-@st.cache_resource
-def load_model():
-    tokenizer = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
-    model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
-    return model, tokenizer
+config = newspaper.Config()
+config.REQUEST_TIMEOUT = 10
+config.browser_user_agent = (
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:108.0) Gecko/20100101 Firefox/108.0"
+)
+
 
 # Logic
 @st.cache_data
 def surf_web(search_query):
     base_url = "https://api.search.brave.com/res/v1/web/search"
-    headers = {"Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": st.secrets["brave_search"]["subscription_token"]}
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": st.secrets["brave_search"]["subscription_token"],
+    }
 
     r = requests.get(base_url, headers=headers, params={"q": search_query})
 
@@ -34,173 +35,179 @@ def surf_web(search_query):
 
     json_data = r.json()
 
-    with open("response.json", "w", encoding='utf-8') as f:
-        json.dump(json_data, f, ensure_ascii=False, indent=4)
-
     return json_data
 
-def remove_html_tags(text):
-    # Regular expression to match HTML tags
-    clean = re.compile('<.*?>')
-    return re.sub(clean, '', text)
 
-def remove_quotation_marks(text):
-    return text.replace('&quot;', '')
+def download_article(url, website_name, title, description):
+    article = newspaper.Article(url, config=config)
+    try:
+        article.download()
+        article.parse()
+        article.nlp()
+    except Exception as e:
+        print(f"Failed to download {url}: {e}")
+    finally:
+        article.title = title
+        article.meta_site_name = website_name
+        article.meta_description = description
+        return article
 
-def generate_summary(text, max_length=512, min_length=30):
-    model, tokenizer = load_model()
-
-    inputs = tokenizer(text, return_tensors='pt', max_length=max_length, truncation=True)
-    summary_ids = model.generate(inputs['input_ids'], max_length=max_length, min_length=min_length, length_penalty=1.0, num_beams=4, early_stopping=True)
-    return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
 
 @st.cache_data
-def search_results_to_dataframe(search_results):
+def download_articles(search_results):
     results = search_results["web"]["results"]
 
-    data = {"url": [], "title": [], "website_name": [], "description": [], "content": [], "summary": []}
+    data = {"url": [], "title": [], "website_name": [], "description": []}
+
     for result in results:
         data["url"].append(result["url"])
         data["title"].append(result["title"])
         data["website_name"].append(result["profile"]["name"])
-        description = result["description"] # a little bit of processing
-        data["description"].append(remove_html_tags(remove_quotation_marks(description)))
+        data["description"].append(result["description"])
 
-        try:
-            article = newspaper.article(result["url"])
-            data["content"].append(article.text)
-        except Exception as e:
-            data["content"].append(None)
-            data["summary"].append(None)
-            print(e)
-            continue
-
-        data["summary"].append(generate_summary(article.text))
-
-    return pd.DataFrame(data)
-
-def select_article_identifier(article_dict):
-    if article_dict.get("summary") and "Something went wrong" not in article_dict["summary"]:
-        return article_dict["summary"]
-    else:
-        return article_dict["title"]
-
-@st.cache_data
-def group_search_results(results_df):
-    random_ind = random.sample(range(len(results_df)), 10)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        articles = list(
+            executor.map(
+                download_article,
+                data["url"],
+                data["website_name"],
+                data["title"],
+                data["description"],
+            )
+        )
 
     article_information = []
-    for ind in random_ind:
-        random_sample = results_df.loc[ind]
+    for article in articles:
+        article_information.append(
+            {
+                "url": article.url,
+                "title": article.title,
+                "description": article.meta_description,
+                "website_name": article.meta_site_name,
+                "summary": article.summary,
+            }
+        )
+    return article_information
 
-        if random_sample["summary"] and "Something went wrong" not in random_sample["summary"]:
-            article_information.append(random_sample["summary"])
+
+@st.cache_data
+def group_articles(articles):
+    article_information = []
+    for article in articles:
+        if not article["summary"] or "Something went wrong" in article["summary"]:
+            article_information.append(
+                f"Title: {article['title']}\n Description: {article['description']}"
+            )
         else:
-            article_information.append(random_sample["title"])
+            article_information.append(
+                f"Title: {article['title']}\n Summary: {article['summary']}"
+            )
 
     messages = [
         {
             "role": "user",
-            "content": f"I will give you 10 headlines or article summaries. I want you to give me a scale that would \
-                let me plot these news articles on a graph. This scale can be, for example, left, right, or center \
-                    of the political spectrum. want you to give me five groups for me to place these articles in. Please \
-                        list the categories as comma-separated values. Here are 10 articles: \
-                            {article_information}."
+            "content": f"I will give you 20 headlines or article summaries. I want you to \
+            give me a scale that would let me plot these news articles on a graph. I \
+            want you to give me five groups for me to place these articles in. Avoid using \
+            the words Unclear, Miscellaneous, or Unrelated in a category name. Groups that \
+            include opposing viewpoints should be as far apart on the x-axis as possible. Here \
+            are the 20 articles: {article_information}.\
+            Here is the format of your response: \
+            1. <Group 1> \
+            - Title: <Article x title> \
+            - Title: <as many articles as you put in this category> \
+            2. <Group 2> \
+            - Title: <Article y title> \
+            - Title: <as many articles as you put in this category> \
+            3. <Group 3> \
+            - Title: <Article z title> \
+            - Title: <as many articles as you put in this category> \
+            4. <Group 4> \
+            - Title: <Article k title> \
+            - Title: <as many articles as you put in this category> \
+            5. <Group 5> \
+            - Title: <Article l title> \
+            - Title: <as many articles as you put in this category>",
         },
     ]
-
-    response = response = llm.chat.completions.create(
-        model="gpt-4",
-        messages=messages
+        
+    response = client.chat.completions.create(
+        model="meta-llama/Llama-3-70b-chat-hf",
+        messages=messages,
     )
 
-    scale = response.choices[0].message.content.strip("\"")
+    lines = response.choices[0].message.content.split("\n")
 
-    messages.append({
-        "role": "system",
-        "content": scale,
-    })
+    curr_group = ""
+    grouped_articles = {}
+    for i in range(len(lines)):
+        line = lines[i].strip("**")
+        if line.startswith("1.") or line.startswith("2.") or line.startswith("3.") or line.startswith("4.") or line.startswith("5."):
+            curr_group = line.split(". ")[1]
+            grouped_articles[curr_group] = []   
+        elif line.startswith("- Title:"):
+            title = line.split("Title: ")[1]
+            article = [article for article in articles if article["title"] == title][0]
+            grouped_articles[curr_group].append(article)
+        else:
+            continue
 
-    grouped_data = {group.strip("\'\"[]").strip(): [] for group in scale.split(",")}
+    return grouped_articles
 
-    for _, row in results_df.iterrows():
-        messages.append(
-            {
-                "role": "user",
-                "content": f"Given this scale you've provided, please categorize the following article given \
-                    the summary: {select_article_identifier(row)}. Please only output the category name."
-            }
-        )
-
-        response = llm.chat.completions.create(
-            model="gpt-4",
-            messages=messages
-        )
-
-        from pprint import pprint
-        pprint(response)
-
-        group = response.choices[0].message.content.strip("\"\'").strip()
-        grouped_data[group].append(
-            {
-                "url": row["url"],
-                "title": row["title"],
-                "website_name": row["website_name"],
-                "summary": row["summary"]
-            }
-        )
-
-    return grouped_data
 
 def main():
     # UI
     query = st.text_input("Search the web privately...")
-    # num_results = st.slider("Number of results", min_value=10, max_value=100, value=20)
     if query:
         results = surf_web(query)
-        results_df = search_results_to_dataframe(results)
-        grouped_results = group_search_results(results_df)
+        articles = download_articles(results)
+        grouped_articles = group_articles(articles)
 
         col1, col2, col3, col4, col5 = st.columns(5)
-        group1, group2, group3, group4, group5 = grouped_results.keys()
+
+        group1, group2, group3, group4, group5 = grouped_articles.keys()
 
         with col1:
             st.write(group1)
-            for result in grouped_results[group1]:
-                if st.button(result["website_name"], key=result["url"]):
-                    st.session_state["search_result"] = result
+            for article in grouped_articles[group1]:
+                if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                    st.session_state["search_result"] = article
+                    
         with col2:
             st.write(group2)
-            for result in grouped_results[group2]:
-                if st.button(result["website_name"], key=result["url"]):
-                    st.session_state["search_result"] = result
+            for article in grouped_articles[group2]:
+                if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                    st.session_state["search_result"] = article
+
         with col3:
             st.write(group3)
-            for result in grouped_results[group3]:
-                if st.button(result["website_name"], key=result["url"]):
-                    st.session_state["search_result"] = result
+            for article in grouped_articles[group3]:
+                if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                    st.session_state["search_result"] = article
 
         with col4:
             st.write(group4)
-            for result in grouped_results[group4]:
-                if st.button(result["website_name"], key=result["url"]):
-                    st.session_state["search_result"] = result
-        
+            for article in grouped_articles[group4]:
+                if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                    st.session_state["search_result"] = article
+
         with col5:
             st.write(group5)
-            for result in grouped_results[group5]:
-                if st.button(result["website_name"], key=result["url"]):
-                    st.session_state["search_result"] = result
+            for article in grouped_articles[group5]:
+                if st.button(article["website_name"], help=article["title"], key=article["url"]):
+                    st.session_state["search_result"] = article
 
-        
         with st.sidebar:
             if not st.session_state.get("search_result"):
                 st.write("Click a button to view the search result here.")
             else:
                 st.write(f'## {st.session_state["search_result"]["title"]}')
                 st.write(f'{st.session_state["search_result"]["summary"]}')
-                st.markdown(f"[Go to this page]({st.session_state['search_result']['url']})", unsafe_allow_html=True)
+                st.markdown(
+                    f"[Go to this page]({st.session_state['search_result']['url']})",
+                    unsafe_allow_html=True,
+                )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
