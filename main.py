@@ -97,7 +97,8 @@ def group_articles(articles):
     for article in articles:
         if not article["summary"] or "Something went wrong" in article["summary"]:
             article_information.append(
-                f"Title: {article['title']}\n Description: {article['description']}\n Url: {article['url']}"
+                f"Title: {article['title']}\n Description: {article['description']}\n \
+                Url: {article['url']}"
             )
         else:
             article_information.append(
